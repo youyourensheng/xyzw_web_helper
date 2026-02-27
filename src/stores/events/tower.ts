@@ -51,6 +51,31 @@ export const TowerPlugin = ({
 
   onSome(["fight_starttower", "fight_starttowerresp"], (data: XyzwSession) => {
     gameLogger.verbose(`收到爬塔战斗开始事件: ${data.tokenId}`, data);
+
+    // 处理"上座塔奖励未领取"错误 (1500040)
+    if ((data as any).code === 1500040) {
+      gameLogger.warn(`爬塔失败: 上座塔奖励未领取 (Code: 1500040) - 尝试自动领取`);
+      const { gameData, client } = data;
+      const roleInfo = gameData.value.roleInfo;
+      // 尝试从角色信息获取当前塔层数
+      const towerId = roleInfo?.role?.tower?.id;
+
+      if (towerId !== undefined) {
+        // 计算应该领取的奖励层数 (例如11层时，towerId=11，应领第1层奖励)
+        const rewardFloor = Math.floor(towerId / 10);
+        if (rewardFloor > 0) {
+          gameLogger.info(`发起自动领取奖励请求: 第${rewardFloor}层奖励`);
+          client?.send("tower_claimreward", { rewardId: rewardFloor });
+          
+          // 领取后刷新数据
+          setTimeout(() => {
+            client?.send("role_getroleinfo", {});
+          }, 1000);
+        }
+      }
+      return;
+    }
+
     const { body, gameData, client } = data;
     // 保存爬塔结果到gameData中，供组件使用
     if (!gameData.value.towerResult) {
@@ -96,7 +121,11 @@ export const TowerPlugin = ({
           // 保存奖励信息
           gameData.value.towerResult.autoReward = true;
           gameData.value.towerResult.rewardFloor = rewardFloor;
-          client?.send("tower_claimreward", { rewardId: rewardFloor });
+          try {
+            client?.send("tower_claimreward", { rewardId: rewardFloor });
+          } catch (error) {
+            gameLogger.error(`领取奖励失败: ${error}`);
+          }
         }
       }, 1500);
     }

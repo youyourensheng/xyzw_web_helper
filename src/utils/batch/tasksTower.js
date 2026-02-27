@@ -150,6 +150,52 @@ export function createTasksTower(deps) {
               continue;
             }
 
+            // 处理"上座塔奖励未领取"错误 (1500040)
+            if (err.message && err.message.includes("1500040")) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 上座塔奖励未领取，尝试自动领取并等待...`,
+                type: "warning",
+              });
+              
+              // 尝试获取当前塔层数
+              try {
+                // 如果本地没有roleInfo，尝试获取一次
+                if (!roleInfo) {
+                   roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+                }
+                const towerId = roleInfo?.role?.tower?.id;
+                
+                if (towerId !== undefined) {
+                   const rewardFloor = Math.floor(towerId / 10);
+                   if (rewardFloor > 0) {
+                      addLog({
+                        time: new Date().toLocaleTimeString(),
+                        message: `${token.name} 尝试领取第 ${rewardFloor} 层奖励`,
+                        type: "info",
+                      });
+                      // 发送领取请求，不等待响应，因为可能通过事件处理了
+                      tokenStore.sendMessage(tokenId, "tower_claimreward", { rewardId: rewardFloor });
+                   }
+                }
+              } catch (e) {
+                 // 忽略获取信息失败
+              }
+
+              // 等待较长时间让领取生效
+              await new Promise((r) => setTimeout(r, 3000));
+              
+              // 刷新角色信息以更新状态
+              try {
+                 roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+                 energy = roleInfo?.role?.tower?.energy || 0;
+              } catch (e) {}
+
+              // 重置连续失败计数，因为这是一个可恢复的错误
+              consecutiveFailures = 0;
+              continue;
+            }
+
             consecutiveFailures++;
             addLog({
               time: new Date().toLocaleTimeString(),
