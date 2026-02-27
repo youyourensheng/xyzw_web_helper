@@ -130,15 +130,6 @@ export const TowerPlugin = ({
       }, 1500);
     }
 
-    // 爬塔后立即更新角色信息和塔信息
-    // TODO: 可以改为只更新塔信息，或者在领取奖励后再更新角色信息，以减少请求次数
-    setTimeout(() => {
-      try {
-        client?.send("role_getroleinfo", {});
-      } catch (error) {
-        // 忽略更新数据错误
-      }
-    }, 1000);
   });
 
   onSome(["tower_claimreward", "tower_claimrewardresp"], (data: XyzwSession) => {

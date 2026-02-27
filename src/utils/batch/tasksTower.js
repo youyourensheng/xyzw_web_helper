@@ -130,15 +130,27 @@ export function createTasksTower(deps) {
             await new Promise((r) => setTimeout(r, 1000));
 
             // Refresh energy
-            tokenStore.sendMessage(tokenId, "tower_getinfo");
-            await new Promise((r) => setTimeout(r, 1000));
-            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-
-            const storeRoleInfo = tokenStore.gameData?.roleInfo;
-            energy =
-              storeRoleInfo?.role?.tower?.energy ??
-              roleInfo?.role?.tower?.energy ??
-              0;
+            // 默认每5次刷新一次，或体力不足时刷新
+            if (count % 5 === 0) {
+               try {
+                  roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+                  energy = roleInfo?.role?.tower?.energy || 0;
+               } catch (e) {
+                 // 忽略刷新失败
+               }
+            } else {
+               // 尝试从本地缓存获取最新的体力信息（如果其他地方更新了）
+               const storeRoleInfo = tokenStore.gameData?.roleInfo;
+               const storeEnergy = storeRoleInfo?.role?.tower?.energy;
+               
+               // 如果store中的体力大于当前预计剩余体力，说明可能有额外恢复/奖励，使用store的值
+               if (storeEnergy !== undefined && storeEnergy > (energy - 1)) {
+                   energy = storeEnergy;
+               } else {
+                   // 本地扣除体力
+                   energy--;
+               }
+            }
           } catch (err) {
             if (err.message && err.message.includes("200400")) {
               addLog({
