@@ -144,15 +144,15 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from "vue";
+import { ChevronDown, Cube, Refresh, Search } from "@vicons/ionicons5";
+import { useDialog, useMessage } from "naive-ui";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { useMessage, useDialog } from "naive-ui";
-import { useTokenStore } from "@/stores/tokenStore";
 import DailyTaskCard from "@/components/Daily/DailyTaskCard.vue";
-import { Refresh, ChevronDown, Search, Cube } from "@vicons/ionicons5";
+import { useAuthStore } from "@/stores/auth";
 import { useGameRolesStore } from "@/stores/gameRoles";
 import { useLocalTokenStore } from "@/stores/localTokenManager";
-import { useAuthStore } from "@/stores/auth";
+import { useTokenStore } from "@/stores/tokenStore";
 
 const router = useRouter();
 const message = useMessage();
@@ -347,9 +347,6 @@ const refreshTasks = async () => {
 
 // 生成模拟任务数据
 const generateMockTasks = (roleId) => {
-  const role = gameRolesStore.gameRoles.find((r) => r.id === roleId);
-  const roleName = role?.name || "未知角色";
-
   return [
     {
       id: `task_${roleId}_daily_signin`,

@@ -38,7 +38,10 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
    * @param {string} tokenId - Token ID
    * @param {number} timeout - 超时时间
    */
-  const waitForConnection = async (tokenId, timeout = batchSettings.connectionTimeout) => {
+  const waitForConnection = async (
+    tokenId,
+    timeout = batchSettings.connectionTimeout,
+  ) => {
     const start = Date.now();
     while (Date.now() - start < timeout) {
       const status = tokenStore.getWebSocketStatus(tokenId);
@@ -60,7 +63,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
       throw new Error(`Token not found: ${tokenId}`);
     }
 
-    let status = tokenStore.getWebSocketStatus(tokenId);
+    const status = tokenStore.getWebSocketStatus(tokenId);
     let connected = status === "connected";
 
     if (!connected) {
@@ -76,7 +79,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
       tokenStore.createWebSocketConnection(
         tokenId,
         latestToken.token,
-        latestToken.wsUrl
+        latestToken.wsUrl,
       );
       connected = await waitForConnection(tokenId);
 
@@ -100,7 +103,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
         tokenStore.createWebSocketConnection(
           tokenId,
           refreshedToken.token,
-          refreshedToken.wsUrl
+          refreshedToken.wsUrl,
         );
 
         connected = await waitForConnection(tokenId);
@@ -122,7 +125,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
         tokenId,
         "role_getroleinfo",
         {},
-        5000
+        5000,
       );
 
       // Fetch Battle Version
@@ -130,7 +133,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
         tokenId,
         "fight_startlevel",
         {},
-        5000
+        5000,
       );
       if (res?.battleData?.version) {
         tokenStore.setBattleVersion(res.battleData.version);
@@ -187,7 +190,7 @@ export const getActivityStatus = () => {
 
   const elapsed = now - start;
   let currentActivityWeek = null;
-  
+
   if (elapsed >= 0) {
     const cyclePosition = elapsed % cycleDuration;
     if (cyclePosition < weekDuration) {
@@ -200,8 +203,6 @@ export const getActivityStatus = () => {
   }
 
   return {
-    // 车活动开放 (周一到周三)
-    isCarActivityOpen: day >= 1 && day <= 3,
     // 梦境活动开放 (周日、周一、周三、周四)
     ismengjingActivityOpen: day === 0 || day === 1 || day === 3 || day === 4,
     // 宝库活动开放 (非周一、周二)
@@ -244,7 +245,7 @@ export const calculateMonthProgress = () => {
   const daysInMonth = new Date(
     now.getFullYear(),
     now.getMonth() + 1,
-    0
+    0,
   ).getDate();
   const dayOfMonth = now.getDate();
   return Math.min(1, Math.max(0, dayOfMonth / daysInMonth));

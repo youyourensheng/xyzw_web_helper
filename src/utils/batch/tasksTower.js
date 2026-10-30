@@ -1,3 +1,4 @@
+import { isSameGameValue } from "@/utils/gameValue.js";
 import { getTowerActId } from "../towerActId.js";
 
 /**
@@ -7,9 +8,73 @@ import { getTowerActId } from "../towerActId.js";
 import { normalizeWeirdTowerMaxClimb } from "../towerClimbLimit.js";
 
 /**
+ * 补领怪异塔未领取的章节通关奖励
+ *
+ * evoTower.towerId 是层号（如 240 表示已通关第 24 章），rewardTowerId 是已领取到的章号。
+ * 两者不一致说明有章节奖励未领取，此时游戏服会拒绝 evotower_readyfight 并返回 12200020，
+ * 导致爬塔无法开始。故需在爬塔前按 rewardTowerId 主动补齐。
+ *
+ * @param {object} tokenStore - token store
+ * @param {string} tokenId - token id
+ * @param {object} evoTower - evotower_getinfo 返回的 evoTower 对象
+ * @param {Function} onLog - 日志回调 (message, type) => void
+ * @returns {Promise<number>} 实际补领的章节数
+ */
+async function claimPendingEvoTowerRewards(
+  tokenStore,
+  tokenId,
+  evoTower,
+  onLog,
+) {
+  const towerId = Number(evoTower?.towerId ?? 0);
+  const rewardTowerId = Number(evoTower?.rewardTowerId ?? 0);
+  if (!towerId) {
+    return 0;
+  }
+
+  const clearedChapter = Math.floor(towerId / 10);
+  let pending = clearedChapter - rewardTowerId;
+  if (pending <= 0) {
+    return 0;
+  }
+
+  onLog?.(
+    `检测到 ${pending} 个未领取的章节通关奖励（已通关第 ${clearedChapter} 章，已领至第 ${rewardTowerId} 章），先行补领`,
+    "warning",
+  );
+
+  let claimed = 0;
+  while (pending > 0) {
+    try {
+      const res = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "evotower_claimreward",
+        {},
+        5000,
+      );
+      claimed++;
+      pending--;
+      onLog?.(
+        `已领取第 ${res?.evoTower?.rewardTowerId ?? rewardTowerId + claimed} 章通关奖励`,
+        "success",
+      );
+      await new Promise((r) => setTimeout(r, 300));
+    } catch (error) {
+      // 领奖失败则停止：继续爬塔只会持续返回 12200020
+      onLog?.(
+        `领取章节奖励失败，已补领 ${claimed}/${claimed + pending} 个：${error?.message || error}`,
+        "error",
+      );
+      break;
+    }
+  }
+  return claimed;
+}
+
+/**
  * 创建爬塔类任务执行器
- * @param {Object} deps - 依赖项
- * @returns {Object} 任务函数集合
+ * @param {object} deps - 依赖项
+ * @returns {object} 任务函数集合
  */
 export function createTasksTower(deps) {
   const {
@@ -51,7 +116,9 @@ export function createTasksTower(deps) {
 
       const token = tokens.value.find((t) => t.id === tokenId);
       // 加载该Token的独立配置，如果未找到则回退到currentSettings
-      const tokenSettings = loadSettings ? (loadSettings(tokenId) || currentSettings) : currentSettings;
+      const tokenSettings = loadSettings
+        ? loadSettings(tokenId) || currentSettings
+        : currentSettings;
 
       try {
         addLog({
@@ -136,24 +203,24 @@ export function createTasksTower(deps) {
             // Refresh energy
             // 默认每5次刷新一次，或体力不足时刷新
             if (count % 5 === 0) {
-               try {
-                  roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-                  energy = roleInfo?.role?.tower?.energy || 0;
-               } catch (e) {
-                 // 忽略刷新失败
-               }
+              try {
+                roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+                energy = roleInfo?.role?.tower?.energy || 0;
+              } catch (e) {
+                // 忽略刷新失败
+              }
             } else {
-               // 尝试从本地缓存获取最新的体力信息（如果其他地方更新了）
-               const storeRoleInfo = tokenStore.gameData?.roleInfo;
-               const storeEnergy = storeRoleInfo?.role?.tower?.energy;
-               
-               // 如果store中的体力大于当前预计剩余体力，说明可能有额外恢复/奖励，使用store的值
-               if (storeEnergy !== undefined && storeEnergy > (energy - 1)) {
-                   energy = storeEnergy;
-               } else {
-                   // 本地扣除体力
-                   energy--;
-               }
+              // 尝试从本地缓存获取最新的体力信息（如果其他地方更新了）
+              const storeRoleInfo = tokenStore.gameData?.roleInfo;
+              const storeEnergy = storeRoleInfo?.role?.tower?.energy;
+
+              // 如果store中的体力大于当前预计剩余体力，说明可能有额外恢复/奖励，使用store的值
+              if (storeEnergy !== undefined && storeEnergy > energy - 1) {
+                energy = storeEnergy;
+              } else {
+                // 本地扣除体力
+                energy--;
+              }
             }
           } catch (err) {
             if (err.message && err.message.includes("200400")) {
@@ -173,38 +240,40 @@ export function createTasksTower(deps) {
                 message: `${token.name} 上座塔奖励未领取，尝试自动领取并等待...`,
                 type: "warning",
               });
-              
+
               // 尝试获取当前塔层数
               try {
                 // 如果本地没有roleInfo，尝试获取一次
                 if (!roleInfo) {
-                   roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+                  roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
                 }
                 const towerId = roleInfo?.role?.tower?.id;
-                
+
                 if (towerId !== undefined) {
-                   const rewardFloor = Math.floor(towerId / 10);
-                   if (rewardFloor > 0) {
-                      addLog({
-                        time: new Date().toLocaleTimeString(),
-                        message: `${token.name} 尝试领取第 ${rewardFloor} 层奖励`,
-                        type: "info",
-                      });
-                      // 发送领取请求，不等待响应，因为可能通过事件处理了
-                      tokenStore.sendMessage(tokenId, "tower_claimreward", { rewardId: rewardFloor });
-                   }
+                  const rewardFloor = Math.floor(towerId / 10);
+                  if (rewardFloor > 0) {
+                    addLog({
+                      time: new Date().toLocaleTimeString(),
+                      message: `${token.name} 尝试领取第 ${rewardFloor} 层奖励`,
+                      type: "info",
+                    });
+                    // 发送领取请求，不等待响应，因为可能通过事件处理了
+                    tokenStore.sendMessage(tokenId, "tower_claimreward", {
+                      rewardId: rewardFloor,
+                    });
+                  }
                 }
               } catch (e) {
-                 // 忽略获取信息失败
+                // 忽略获取信息失败
               }
 
               // 等待较长时间让领取生效
               await new Promise((r) => setTimeout(r, 3000));
-              
+
               // 刷新角色信息以更新状态
               try {
-                 roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-                 energy = roleInfo?.role?.tower?.energy || 0;
+                roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+                energy = roleInfo?.role?.tower?.energy || 0;
               } catch (e) {}
 
               // 重置连续失败计数，因为这是一个可恢复的错误
@@ -298,7 +367,9 @@ export function createTasksTower(deps) {
 
       const token = tokens.value.find((t) => t.id === tokenId);
       // 加载该Token的独立配置，如果未找到则回退到currentSettings
-      const tokenSettings = loadSettings ? (loadSettings(tokenId) || currentSettings) : currentSettings;
+      const tokenSettings = loadSettings
+        ? loadSettings(tokenId) || currentSettings
+        : currentSettings;
 
       try {
         addLog({
@@ -362,6 +433,19 @@ export function createTasksTower(deps) {
           type: "info",
         });
 
+        // 爬塔前先补领未领取的章节奖励，否则 evotower_readyfight 会被拒绝（12200020）
+        await claimPendingEvoTowerRewards(
+          tokenStore,
+          tokenId,
+          evotowerinfo1?.evoTower,
+          (message, type) =>
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} ${message}`,
+              type,
+            }),
+        );
+
         let count = 0;
         const MAX_CLIMB = normalizeWeirdTowerMaxClimb(
           weirdTowerMaxClimb?.value ?? weirdTowerMaxClimb,
@@ -383,7 +467,7 @@ export function createTasksTower(deps) {
               5000,
             );
 
-            const fightResult = await tokenStore.sendMessageWithPromise(
+            await tokenStore.sendMessageWithPromise(
               tokenId,
               "evotower_fight",
               {
@@ -411,66 +495,67 @@ export function createTasksTower(deps) {
             );
 
             // 检查并领取每日任务奖励
-            if (evotowerinfo2 && evotowerinfo2.evoTower && evotowerinfo2.evoTower.taskClaimMap) {
-                 const now = new Date();
-                 const year = now.getFullYear().toString().slice(2);
-                 const month = (now.getMonth() + 1).toString().padStart(2, '0');
-                 const day = now.getDate().toString().padStart(2, '0');
-                 const dateKey = `${year}${month}${day}`;
-                 
-                 const dailyTasks = evotowerinfo2.evoTower.taskClaimMap[dateKey] || {};
-                 const taskIds = [1, 2, 3];
-                 
-                 for (const taskId of taskIds) {
-                    if (!dailyTasks[taskId]) {
-                      await tokenStore.sendMessageWithPromise(
-                        tokenId,
-                        "evotower_claimtask",
-                        { taskId: taskId },
-                        2000
-                      ).then(() => {
-                         addLog({
-                            time: new Date().toLocaleTimeString(),
-                            message: `${token.name} 领取每日任务奖励 ${taskId} 成功`,
-                            type: "success",
-                         });
-                      }).catch(() => {});
-                      await new Promise(r => setTimeout(r, 200)); 
-                    }
-                 }
+            if (
+              evotowerinfo2 &&
+              evotowerinfo2.evoTower &&
+              evotowerinfo2.evoTower.taskClaimMap
+            ) {
+              const now = new Date();
+              const year = now.getFullYear().toString().slice(2);
+              const month = (now.getMonth() + 1).toString().padStart(2, "0");
+              const day = now.getDate().toString().padStart(2, "0");
+              const dateKey = `${year}${month}${day}`;
+
+              const dailyTasks =
+                evotowerinfo2.evoTower.taskClaimMap[dateKey] || {};
+              const taskIds = [1, 2, 3];
+
+              for (const taskId of taskIds) {
+                if (!dailyTasks[taskId]) {
+                  await tokenStore
+                    .sendMessageWithPromise(
+                      tokenId,
+                      "evotower_claimtask",
+                      { taskId },
+                      2000,
+                    )
+                    .then(() => {
+                      addLog({
+                        time: new Date().toLocaleTimeString(),
+                        message: `${token.name} 领取每日任务奖励 ${taskId} 成功`,
+                        type: "success",
+                      });
+                    })
+                    .catch(() => {});
+                  await new Promise((r) => setTimeout(r, 200));
+                }
+              }
             }
 
-            // 检查是否刚通关10层
-            const towerId = evotowerinfo2?.evoTower?.towerId || 0;
-            const floor = (towerId % 10) + 1;
-            if (
-              fightResult &&
-              fightResult.winList &&
-              fightResult.winList[0] === true &&
-              floor === 1
-            ) {
-              await tokenStore.sendMessageWithPromise(
-                tokenId,
-                "evotower_claimreward",
-                {},
-                5000,
-              );
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 成功领取第${Math.floor(towerId / 10)}章通关奖励！`,
-                type: "success",
-              });
-              await new Promise((r) => setTimeout(r, 1000));
-            }
+            // 通关章节奖励：以 rewardTowerId 为准判断是否有未领取的章节
+            // （原按 (towerId % 10) + 1 === 1 判断，towerId 为 10 的整数倍时恒成立，
+            //   会重复发送领奖命令，且无法感知历史未领取的章节）
+            await claimPendingEvoTowerRewards(
+              tokenStore,
+              tokenId,
+              evotowerinfo2?.evoTower,
+              (message, type) =>
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} ${message}`,
+                  type,
+                }),
+            );
 
             // 刷新能量
             try {
-              const evotowerinfoRefresh1 = await tokenStore.sendMessageWithPromise(
-                tokenId,
-                "evotower_getinfo",
-                {},
-                5000,
-              );
+              const evotowerinfoRefresh1 =
+                await tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "evotower_getinfo",
+                  {},
+                  5000,
+                );
               currentEnergy = evotowerinfoRefresh1?.evoTower?.energy || 0;
             } catch (e) {
               // 忽略刷新失败
@@ -495,12 +580,13 @@ export function createTasksTower(deps) {
             await new Promise((r) => setTimeout(r, 1000));
 
             try {
-              const evotowerinfoRefresh2 = await tokenStore.sendMessageWithPromise(
-                tokenId,
-                "evotower_getinfo",
-                {},
-                5000,
-              );
+              const evotowerinfoRefresh2 =
+                await tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "evotower_getinfo",
+                  {},
+                  5000,
+                );
               currentEnergy = evotowerinfoRefresh2?.evoTower?.energy || 0;
             } catch (e) {
               // 忽略刷新失败
@@ -664,14 +750,18 @@ export function createTasksTower(deps) {
           tokenId,
           "towers_getinfo",
           { actId: getTowerActId() },
-          5000
+          5000,
         );
-        
-        let towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
+
+        let towerData = res.actId
+          ? res
+          : res.towerData && res.towerData.actId
+            ? res.towerData
+            : res;
 
         // 检查活动是否有效
         if (!towerData.actId) {
-           addLog({
+          addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 换皮闯关活动信息获取失败`,
             type: "warning",
@@ -682,26 +772,26 @@ export function createTasksTower(deps) {
 
         const actId = String(towerData.actId);
         if (actId.length >= 6) {
-           const year = "20" + actId.substring(0, 2);
-           const month = actId.substring(2, 4);
-           const day = actId.substring(4, 6);
-           const startDate = new Date(`${year}-${month}-${day}T00:00:00`);
-           const endDate = new Date(startDate);
-           endDate.setDate(startDate.getDate() + 7);
-           const now = new Date();
-           if (now < startDate || now >= endDate) {
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 换皮闯关活动已结束`,
-                type: "warning",
-              });
-              tokenStatus.value[tokenId] = "completed";
-              return;
-           }
+          const year = `20${actId.substring(0, 2)}`;
+          const month = actId.substring(2, 4);
+          const day = actId.substring(4, 6);
+          const startDate = new Date(`${year}-${month}-${day}T00:00:00`);
+          const endDate = new Date(startDate);
+          endDate.setDate(startDate.getDate() + 7);
+          const now = new Date();
+          if (now < startDate || now >= endDate) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 换皮闯关活动已结束`,
+              type: "warning",
+            });
+            tokenStatus.value[tokenId] = "completed";
+            return;
+          }
         }
 
         let levelRewardMap = towerData.levelRewardMap || {};
-        
+
         // 计算今日开放的BOSS
         const todayWeekDay = new Date().getDay(); // 0-6 (Sun-Sat)
         const openTowerMap = {
@@ -711,7 +801,7 @@ export function createTasksTower(deps) {
           1: [4], // Monday
           2: [5], // Tuesday
           3: [6], // Wednesday
-          4: [1, 2, 3, 4, 5, 6] // Thursday (All open)
+          4: [1, 2, 3, 4, 5, 6], // Thursday (All open)
         };
         const todayOpenTowers = openTowerMap[todayWeekDay] || [];
 
@@ -721,120 +811,181 @@ export function createTasksTower(deps) {
           const key2 = Number(key1);
           return !!(map[key1] || map[key2]);
         };
-        
+
         // 辅助函数：获取当前层数
         const getTowerLevel = (type, map) => {
-           for (let i = 8; i >= 1; i--) {
+          for (let i = 8; i >= 1; i--) {
             const key1 = `${type}00${i}`;
             const key2 = Number(key1);
             if (map[key1] || map[key2]) {
-                if (i === 8) return 8;
-                return i + 1;
+              if (i === 8) return 8;
+              return i + 1;
             }
           }
           return 1;
         };
 
         // 筛选未通关的BOSS
-        const targetTowers = todayOpenTowers.filter(type => !isTowerCleared(type, levelRewardMap));
+        const targetTowers = todayOpenTowers.filter(
+          (type) => !isTowerCleared(type, levelRewardMap),
+        );
 
         if (todayWeekDay === 4) {
-             addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 周四全开放，检测到需补打BOSS: ${targetTowers.length > 0 ? targetTowers.join(', ') : '无'}`,
-                type: "info",
-             });
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 周四全开放，检测到需补打BOSS: ${targetTowers.length > 0 ? targetTowers.join(", ") : "无"}`,
+            type: "info",
+          });
         } else if (targetTowers.length === 0 && todayOpenTowers.length > 0) {
-             addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 今日BOSS ${todayOpenTowers[0]} 已通关`,
-                type: "info",
-             });
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 今日BOSS ${todayOpenTowers[0]} 已通关`,
+            type: "info",
+          });
         }
 
         if (targetTowers.length === 0) {
-             tokenStatus.value[tokenId] = "completed";
-             addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `=== ${token.name} 换皮闯关结束 (无需挑战) ===`,
-                type: "success",
-             });
-             return;
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `=== ${token.name} 换皮闯关结束 (无需挑战) ===`,
+            type: "success",
+          });
+          return;
         }
 
         for (const type of targetTowers) {
-            if (shouldStop.value) break;
+          if (shouldStop.value) break;
 
-            addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 开始挑战 BOSS ${type}`,
-                type: "info",
-            });
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 开始挑战 BOSS ${type}`,
+            type: "info",
+          });
 
-            let needStart = true;
-            let loop = true;
-            let failCount = 0;
+          let needStart = true;
+          let loop = true;
+          let failCount = 0;
 
-            while (loop && !shouldStop.value) {
-                if (needStart) {
-                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { actId: getTowerActId(), towerType: type }, 5000);
-                    // 稍微等待一下
-                    await new Promise(r => setTimeout(r, 500));
-                }
-
-                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { actId: getTowerActId(), towerType: type }, 5000);
-                const battleData = fightRes?.battleData;
-                const curHP = battleData?.result?.accept?.ext?.curHP;
-                
-                const currentLevel = getTowerLevel(type, levelRewardMap);
-
-                if (curHP === 0) {
-                     addLog({
-                        time: new Date().toLocaleTimeString(),
-                        message: `${token.name} BOSS ${type} 第 ${currentLevel} 层挑战成功`,
-                        type: "success",
-                     });
-
-                     needStart = false;
-                     failCount = 0;
-
-                     // 刷新数据
-                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: getTowerActId() }, 5000);
-                     towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
-                     levelRewardMap = towerData.levelRewardMap || {};
-
-                     if (isTowerCleared(type, levelRewardMap)) {
-                        loop = false;
-                        addLog({
-                            time: new Date().toLocaleTimeString(),
-                            message: `${token.name} BOSS ${type} 全部通关`,
-                            type: "success",
-                        });
-                     } else {
-                        await new Promise(r => setTimeout(r, 1000));
-                     }
-                } else {
-                     addLog({
-                        time: new Date().toLocaleTimeString(),
-                        message: `${token.name} BOSS ${type} 第 ${currentLevel} 层挑战失败`,
-                        type: "warning",
-                     });
-
-                     needStart = true;
-                     failCount++;
-
-                     if (failCount >= 3) {
-                         addLog({
-                            time: new Date().toLocaleTimeString(),
-                            message: `${token.name} BOSS ${type} 连续失败3次，跳过`,
-                            type: "error",
-                         });
-                         loop = false;
-                     } else {
-                        await new Promise(r => setTimeout(r, 1000));
-                     }
-                }
+          while (loop && !shouldStop.value) {
+            if (needStart) {
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "towers_start",
+                { actId: getTowerActId(), towerType: type },
+                5000,
+              );
+              // 稍微等待一下
+              await new Promise((r) => setTimeout(r, 500));
             }
+
+            const fightRes = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "towers_fight",
+              { actId: getTowerActId(), towerType: type },
+              5000,
+            );
+            const battleData = fightRes?.battleData;
+            const curHP = battleData?.result?.accept?.ext?.curHP;
+
+            const currentLevel = getTowerLevel(type, levelRewardMap);
+
+            if (curHP === 0) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} BOSS ${type} 第 ${currentLevel} 层挑战成功`,
+                type: "success",
+              });
+
+              needStart = false;
+              failCount = 0;
+
+              // 刷新数据
+              res = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "towers_getinfo",
+                { actId: getTowerActId() },
+                5000,
+              );
+              towerData = res.actId
+                ? res
+                : res.towerData && res.towerData.actId
+                  ? res.towerData
+                  : res;
+              levelRewardMap = towerData.levelRewardMap || {};
+
+              if (isTowerCleared(type, levelRewardMap)) {
+                loop = false;
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} BOSS ${type} 全部通关`,
+                  type: "success",
+                });
+              } else {
+                await new Promise((r) => setTimeout(r, 1000));
+              }
+            } else {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} BOSS ${type} 第 ${currentLevel} 层挑战失败`,
+                type: "warning",
+              });
+
+              needStart = true;
+              failCount++;
+
+              if (failCount >= 3) {
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} BOSS ${type} 连续失败3次，跳过`,
+                  type: "error",
+                });
+                loop = false;
+              } else {
+                await new Promise((r) => setTimeout(r, 1000));
+              }
+            }
+          }
+        }
+
+        // 闯关结束后循环领取奖励
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 闯关结束，开始领取奖励`,
+          type: "info",
+        });
+        let claimCount = 0;
+        const claimActId =
+          Number(actId) % 10 === 1 ? Number(actId) + 1 : Number(actId);
+        try {
+          while (!shouldStop.value) {
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "activity_startactegame",
+              { actId: claimActId },
+              5000,
+            );
+            claimCount++;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 活动 ${claimActId} 领取奖励第 ${claimCount} 次`,
+              type: "success",
+            });
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        } catch (e) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 活动 ${claimActId} 领取结束（共 ${claimCount} 次）`,
+            type: claimCount > 0 ? "success" : "info",
+          });
+        }
+        if (claimCount > 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 领取奖励 ${claimCount} 次`,
+            type: "success",
+          });
         }
 
         tokenStatus.value[tokenId] = "completed";
@@ -843,14 +994,13 @@ export function createTasksTower(deps) {
           message: `=== ${token.name} 换皮闯关结束 ===`,
           type: "success",
         });
-
       } catch (error) {
         console.error(error);
         tokenStatus.value[tokenId] = "failed";
 
         let errorMessage = error.message;
         if (errorMessage && errorMessage.includes("200330")) {
-           errorMessage = "存在未完成的挑战，需要手动处理";
+          errorMessage = "存在未完成的挑战，需要手动处理";
         }
 
         addLog({
@@ -905,7 +1055,7 @@ export function createTasksTower(deps) {
           tokenId,
           "mergebox_getinfo",
           { actType: 1 },
-          5000
+          5000,
         );
 
         // 获取怪异塔信息以读取剩余道具数量
@@ -913,7 +1063,7 @@ export function createTasksTower(deps) {
           tokenId,
           "evotower_getinfo",
           {},
-          5000
+          5000,
         );
 
         if (!infoRes || !infoRes.mergeBox) {
@@ -957,9 +1107,9 @@ export function createTasksTower(deps) {
             "mergebox_openbox",
             {
               actType: 1,
-              pos: pos
+              pos,
             },
-            5000
+            5000,
           );
 
           costTotalCnt++;
@@ -970,12 +1120,14 @@ export function createTasksTower(deps) {
         }
 
         // 领取累计奖励
-        await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "mergebox_claimcostprogress",
-          { actType: 1 },
-          5000
-        ).catch(() => {});
+        await tokenStore
+          .sendMessageWithPromise(
+            tokenId,
+            "mergebox_claimcostprogress",
+            { actType: 1 },
+            5000,
+          )
+          .catch(() => {});
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${token.name} 尝试领取累计使用奖励`,
@@ -988,7 +1140,6 @@ export function createTasksTower(deps) {
           message: `=== ${token.name} 使用道具结束，共使用 ${processedCount} 次 ===`,
           type: "success",
         });
-
       } catch (error) {
         console.error(error);
         tokenStatus.value[tokenId] = "failed";
@@ -1051,16 +1202,16 @@ export function createTasksTower(deps) {
             tokenId,
             "mergebox_getinfo",
             { actType: 1 },
-            5000
+            5000,
           );
 
           if (!infoRes || !infoRes.mergeBox) {
             addLog({
-               time: new Date().toLocaleTimeString(),
-               message: `${token.name} 返回数据缺少 mergeBox`,
-               type: "warning",
-             });
-             break;
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 返回数据缺少 mergeBox`,
+              type: "warning",
+            });
+            break;
           }
 
           // 领取合成奖励
@@ -1079,32 +1230,34 @@ export function createTasksTower(deps) {
               9: { name: "动感电饭锅", reward: "5000白玉" },
               10: { name: "迅捷烤炉", reward: "12珍珠" },
               11: { name: "至尊打蛋机", reward: "15彩玉" },
-              12: { name: "完美烤炉", reward: "24珍珠" }
+              12: { name: "完美烤炉", reward: "24珍珠" },
             };
 
             for (const taskId in taskMap) {
               if (shouldStop.value) break;
               if (taskMap[taskId] !== 0 && !taskClaimMap[taskId]) {
-                 await tokenStore.sendMessageWithPromise(
-                   tokenId,
-                   "mergebox_claimmergeprogress",
-                   { actType: 1, taskId: parseInt(taskId) },
-                   2000
-                 ).catch(() => {});
+                await tokenStore
+                  .sendMessageWithPromise(
+                    tokenId,
+                    "mergebox_claimmergeprogress",
+                    { actType: 1, taskId: Number.parseInt(taskId) },
+                    2000,
+                  )
+                  .catch(() => {});
 
-                 const idStr = String(taskId);
-                 const lastTwo = parseInt(idStr.slice(-2));
-                 const taskInfo = rewardMapping[lastTwo];
-                 const taskDesc = taskInfo 
-                    ? `${lastTwo}级 ${taskInfo.reward ? " 奖励" + taskInfo.reward : ""}` 
-                    : `任务${taskId}`;
-                 
-                 addLog({
-                   time: new Date().toLocaleTimeString(),
-                   message: `${token.name} 领取合成奖励: ${taskDesc}`,
-                   type: "success",
-                 });
-                 await new Promise((res) => setTimeout(res, 500));
+                const idStr = String(taskId);
+                const lastTwo = Number.parseInt(idStr.slice(-2));
+                const taskInfo = rewardMapping[lastTwo];
+                const taskDesc = taskInfo
+                  ? `${lastTwo}级 ${taskInfo.reward ? ` 奖励${taskInfo.reward}` : ""}`
+                  : `任务${taskId}`;
+
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} 领取合成奖励: ${taskDesc}`,
+                  type: "success",
+                });
+                await new Promise((res) => setTimeout(res, 500));
               }
             }
           }
@@ -1117,11 +1270,15 @@ export function createTasksTower(deps) {
           for (const xStr in gridMap) {
             for (const yStr in gridMap[xStr]) {
               const item = gridMap[xStr][yStr];
-              if (item.gridConfId == 0 && item.gridItemId > 0 && !item.isLock) {
+              if (
+                isSameGameValue(item.gridConfId, 0) &&
+                item.gridItemId > 0 &&
+                !item.isLock
+              ) {
                 items.push({
-                  x: parseInt(xStr),
-                  y: parseInt(yStr),
-                  id: item.gridItemId
+                  x: Number.parseInt(xStr),
+                  y: Number.parseInt(yStr),
+                  id: item.gridItemId,
                 });
               }
             }
@@ -1129,7 +1286,7 @@ export function createTasksTower(deps) {
 
           // 按 gridItemId 分组
           const groupedItems = {};
-          items.forEach(item => {
+          items.forEach((item) => {
             if (!groupedItems[item.id]) {
               groupedItems[item.id] = [];
             }
@@ -1156,7 +1313,10 @@ export function createTasksTower(deps) {
             break;
           }
 
-          const isLevel8OrAbove = infoRes.mergeBox.taskMap && infoRes.mergeBox.taskMap["251212208"] && infoRes.mergeBox.taskMap["251212208"] !== 0;
+          const isLevel8OrAbove =
+            infoRes.mergeBox.taskMap &&
+            infoRes.mergeBox.taskMap["251212208"] &&
+            infoRes.mergeBox.taskMap["251212208"] !== 0;
 
           if (isLevel8OrAbove) {
             // 8级以上使用智能合成
@@ -1164,7 +1324,7 @@ export function createTasksTower(deps) {
               tokenId,
               "mergebox_automergeitem",
               { actType: 1 },
-              10000 
+              10000,
             );
             await new Promise((res) => setTimeout(res, 1500));
           } else {
@@ -1178,21 +1338,23 @@ export function createTasksTower(deps) {
                 const source = group.shift();
                 const target = group.shift();
 
-                await tokenStore.sendMessageWithPromise(
-                  tokenId,
-                  "mergebox_mergeitem",
-                  {
-                    actType: 1,
-                    sourcePos: { gridX: source.x, gridY: source.y },
-                    targetPos: { gridX: target.x, gridY: target.y }
-                  },
-                  1000
-                ).catch(() => {});
+                await tokenStore
+                  .sendMessageWithPromise(
+                    tokenId,
+                    "mergebox_mergeitem",
+                    {
+                      actType: 1,
+                      sourcePos: { gridX: source.x, gridY: source.y },
+                      targetPos: { gridX: target.x, gridY: target.y },
+                    },
+                    1000,
+                  )
+                  .catch(() => {});
                 await new Promise((res) => setTimeout(res, 300));
               }
             }
           }
-          
+
           // 继续下一轮循环
           await new Promise((res) => setTimeout(res, 500));
         }
@@ -1203,7 +1365,6 @@ export function createTasksTower(deps) {
           message: `=== ${token.name} 一键合成完成 ===`,
           type: "success",
         });
-
       } catch (error) {
         console.error(error);
         tokenStatus.value[tokenId] = "failed";
@@ -1241,9 +1402,5 @@ export function createTasksTower(deps) {
 
 /**
  * 批量使用道具
- * @param {Object} deps
+ * @param {object} deps
  */
-function batchUseItems(deps) {
-  // logic to be implemented inside createTasksTower or moved here if refactored
-  // But based on the file structure, I should add it inside createTasksTower
-}

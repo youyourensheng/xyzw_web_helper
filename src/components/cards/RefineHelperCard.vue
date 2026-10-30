@@ -1,5 +1,5 @@
 <template>
-  <MyCard class="refine-helper" :statusClass="{ active: state.isRunning }">
+  <MyCard class="refine-helper" :status-class="{ active: state.isRunning }">
     <template #icon>
       <img src="/icons/ta.png" alt="洗练图标" />
     </template>
@@ -40,8 +40,14 @@
               @click="selectHero(hero.id)"
             >
               <div class="hero-avatar">
-                <img v-if="HERO_DICT[hero.id]?.avatar" :src="HERO_DICT[hero.id]?.avatar" :alt="hero.name" />
-                <div v-else class="hero-placeholder">{{ hero.name?.substring(0, 2) || "?" }}</div>
+                <img
+                  v-if="HERO_DICT[hero.id]?.avatar"
+                  :src="HERO_DICT[hero.id]?.avatar"
+                  :alt="hero.name"
+                />
+                <div v-else class="hero-placeholder">
+                  {{ hero.name?.substring(0, 2) || "?" }}
+                </div>
               </div>
               <div class="hero-info">
                 <div class="hero-name">{{ hero.name }}</div>
@@ -92,7 +98,7 @@
                 class="slot"
                 :class="{
                   locked: slot.isLocked,
-                  [`color-${slot.colorId}`]: slot.colorId > 0
+                  [`color-${slot.colorId}`]: slot.colorId > 0,
                 }"
               >
                 <n-checkbox
@@ -129,7 +135,9 @@
               >
                 验证
               </n-button>
-              <span v-if="passwordError" class="password-error">{{ passwordError }}</span>
+              <span v-if="passwordError" class="password-error">{{
+                passwordError
+              }}</span>
             </div>
             <div class="password-validated" v-else>
               <n-tag type="success" size="small">密码已验证</n-tag>
@@ -187,9 +195,9 @@
             <h4>自动淬炼设置</h4>
             <!-- 条件列表 -->
             <div class="conditions-list">
-              <div 
-                v-for="(condition, index) in targetConditions" 
-                :key="index" 
+              <div
+                v-for="(condition, conditionIndex) in targetConditions"
+                :key="conditionIndex"
                 class="condition-item"
               >
                 <div class="auto-form">
@@ -214,10 +222,10 @@
                     ></n-input-number>
                   </div>
                   <div class="form-item">
-                    <n-button 
-                      type="error" 
-                      size="small" 
-                      @click="removeCondition(index)"
+                    <n-button
+                      type="error"
+                      size="small"
+                      @click="removeCondition(conditionIndex)"
                       :disabled="targetConditions.length <= 1"
                     >
                       删除
@@ -228,11 +236,7 @@
             </div>
             <!-- 添加条件按钮 -->
             <div class="add-condition">
-              <n-button 
-                type="primary" 
-                size="small" 
-                @click="addCondition"
-              >
+              <n-button type="primary" size="small" @click="addCondition">
                 + 添加条件
               </n-button>
             </div>
@@ -257,11 +261,11 @@
 </template>
 
 <script setup>
-import { ref, computed } from "vue";
 import { useMessage } from "naive-ui";
+import { computed, ref } from "vue";
 import { useTokenStore } from "@/stores/tokenStore";
-import MyCard from "../Common/MyCard.vue";
 import { HERO_DICT } from "@/utils/HeroList.js";
+import MyCard from "../Common/MyCard.vue";
 
 const tokenStore = useTokenStore();
 const message = useMessage();
@@ -274,16 +278,18 @@ const selectedPart = ref(null);
 const quenchCount = ref(0);
 const delay = ref(350);
 // 将单个条件改为数组形式，支持多个条件
-const targetConditions = ref([{
-  attrId: null,
-  attrValue: null
-}]);
+const targetConditions = ref([
+  {
+    attrId: null,
+    attrValue: null,
+  },
+]);
 const jadeCount = ref(0);
 const colorJadeCount = ref(0);
 // 密码验证相关
-const password = ref('');
+const password = ref("");
 const isPasswordValidated = ref(false);
-const passwordError = ref('');
+const passwordError = ref("");
 const isVerifying = ref(false);
 
 // 状态
@@ -421,7 +427,8 @@ const parseTeamData = (presetTeamInfo) => {
     }
     return null;
   };
-  const useTeamId = root.useTeamId ?? root.presetTeamInfo?.useTeamId ?? findUseIdRec(root) ?? 1;
+  const useTeamId =
+    root.useTeamId ?? root.presetTeamInfo?.useTeamId ?? findUseIdRec(root) ?? 1;
 
   const dict = root.presetTeamInfo ?? root;
   const teams = {};
@@ -584,17 +591,13 @@ const verifyPassword = async () => {
   }
 
   isVerifying.value = true;
-  passwordError.value = '';
+  passwordError.value = "";
 
   try {
-    await tokenStore.sendMessageWithPromise(
-      tokenId,
-      "role_commitpassword",
-      {
-        password: password.value,
-        passwordType: 1
-      }
-    );
+    await tokenStore.sendMessageWithPromise(tokenId, "role_commitpassword", {
+      password: password.value,
+      passwordType: 1,
+    });
 
     isPasswordValidated.value = true;
     message.success("密码验证成功");
@@ -609,8 +612,8 @@ const verifyPassword = async () => {
 // 重置密码验证
 const resetPasswordValidation = () => {
   isPasswordValidated.value = false;
-  password.value = '';
-  passwordError.value = '';
+  password.value = "";
+  passwordError.value = "";
 };
 
 // 处理孔位锁定
@@ -707,7 +710,7 @@ const quenchContinuous = () => {
 const addCondition = () => {
   targetConditions.value.push({
     attrId: null,
-    attrValue: null
+    attrValue: null,
   });
 };
 
@@ -723,10 +726,10 @@ const removeCondition = (index) => {
 // 自动淬炼
 const startAutoQuench = () => {
   // 检查是否有有效的条件
-  const hasValidCondition = targetConditions.value.some(condition => 
-    condition.attrId !== null && condition.attrValue !== null
+  const hasValidCondition = targetConditions.value.some(
+    (condition) => condition.attrId !== null && condition.attrValue !== null,
   );
-  
+
   if (!hasValidCondition) {
     message.warning("请至少设置一个有效的目标属性和数值");
     return;
@@ -739,15 +742,16 @@ const startAutoQuench = () => {
 
   state.value.autoQuenching = true;
   state.value.isRunning = true;
-  
+
   // 生成条件描述
   const conditionDescriptions = targetConditions.value
-    .filter(condition => condition.attrId && condition.attrValue)
-    .map(condition => `${getAttrName(condition.attrId)} ≥ ${condition.attrValue}`);
-  
-  message.info(
-    `开始自动淬炼，目标：${conditionDescriptions.join(" 或 ")}`,
-  );
+    .filter((condition) => condition.attrId && condition.attrValue)
+    .map(
+      (condition) =>
+        `${getAttrName(condition.attrId)} ≥ ${condition.attrValue}`,
+    );
+
+  message.info(`开始自动淬炼，目标：${conditionDescriptions.join(" 或 ")}`);
 
   const autoQuench = async () => {
     if (!state.value.autoQuenching) return;
@@ -755,9 +759,7 @@ const startAutoQuench = () => {
     try {
       const result = await executeQuench();
       if (result && checkTargetAttr(result)) {
-        message.success(
-          `已达到目标条件，自动淬炼已停止`,
-        );
+        message.success(`已达到目标条件，自动淬炼已停止`);
         stopQuench();
         return;
       }
@@ -809,8 +811,8 @@ const executeQuench = async () => {
     }
 
     // 检查是否有孔位的attrNum值超过50且未被锁定
-    const highAttrSlots = Object.values(currentEquip.quenches).filter(slot => 
-      slot.attrNum > 50 && !slot.isLocked
+    const highAttrSlots = Object.values(currentEquip.quenches).filter(
+      (slot) => slot.attrNum > 50 && !slot.isLocked,
     );
     const hasHighAttrSlot = highAttrSlots.length > 0;
 
@@ -822,7 +824,7 @@ const executeQuench = async () => {
         heroId: selectedHeroId.value,
         part: selectedPart.value,
         quenchId: 0,
-        quenches: currentEquip.quenches
+        quenches: currentEquip.quenches,
       };
 
       // 发送确认请求并获取响应
@@ -839,19 +841,28 @@ const executeQuench = async () => {
         const hero = confirmResult.role.heroes[String(selectedHeroId.value)];
         if (hero?.equipment?.[selectedPart.value]?.seed) {
           seedFromConfirm = hero.equipment[selectedPart.value].seed;
-          console.log('✅ 从Equipment_ConfirmResp中提取seed:', seedFromConfirm);
+          console.log("✅ 从Equipment_ConfirmResp中提取seed:", seedFromConfirm);
         }
       } else if (confirmResult?.seed) {
         // 处理响应格式2: seed直接在body中
         seedFromConfirm = confirmResult.seed;
-        console.log('✅ 从Equipment_ConfirmResp的body中提取seed:', seedFromConfirm);
+        console.log(
+          "✅ 从Equipment_ConfirmResp的body中提取seed:",
+          seedFromConfirm,
+        );
       } else if (confirmResult?.equipment?.seed) {
         // 处理响应格式3: equipment.seed
         seedFromConfirm = confirmResult.equipment.seed;
-        console.log('✅ 从Equipment_ConfirmResp的equipment中提取seed:', seedFromConfirm);
+        console.log(
+          "✅ 从Equipment_ConfirmResp的equipment中提取seed:",
+          seedFromConfirm,
+        );
       } else {
         // 所有格式都未匹配，记录完整响应以便调试
-        console.log('❌ 未能从Equipment_ConfirmResp中提取seed，响应内容:', JSON.stringify(confirmResult));
+        console.log(
+          "❌ 未能从Equipment_ConfirmResp中提取seed，响应内容:",
+          JSON.stringify(confirmResult),
+        );
       }
     }
 
@@ -878,7 +889,7 @@ const executeQuench = async () => {
 
     // 更新装备信息 - 处理不同格式的响应
     let updatedEquip = null;
-    
+
     // 处理1: Equipment_QuenchResp响应直接包含装备数据
     if (result?.equipment) {
       updatedEquip = result.equipment;
@@ -896,10 +907,11 @@ const executeQuench = async () => {
       updatedEquip = {
         ...heroEquipment.value[selectedPart.value],
         quenches: result.quenches,
-        quenchTimes: (heroEquipment.value[selectedPart.value].quenchTimes || 0) + 1
+        quenchTimes:
+          (heroEquipment.value[selectedPart.value].quenchTimes || 0) + 1,
       };
     }
-    
+
     // 如果获取到了更新的装备数据，更新界面
     if (updatedEquip) {
       // 更新装备对象
@@ -954,7 +966,8 @@ const getEquipFromResult = (result) => {
     return {
       ...heroEquipment.value[selectedPart.value],
       quenches: result.quenches,
-      quenchTimes: (heroEquipment.value[selectedPart.value].quenchTimes || 0) + 1
+      quenchTimes:
+        (heroEquipment.value[selectedPart.value].quenchTimes || 0) + 1,
     };
   }
   // 处理4: 使用当前界面的装备数据（兜底）
@@ -979,21 +992,23 @@ const checkHighQualityAttr = (result) => {
 // 检查目标属性
 const checkTargetAttr = (result) => {
   // 获取有效的条件
-  const validConditions = targetConditions.value.filter(condition => 
-    condition.attrId && condition.attrValue
+  const validConditions = targetConditions.value.filter(
+    (condition) => condition.attrId && condition.attrValue,
   );
-  
+
   if (validConditions.length === 0) return false;
 
   const equip = getEquipFromResult(result);
   if (!equip?.quenches) return false;
 
   const slots = Object.values(equip.quenches);
-  
+
   // 检查是否有任何一个条件满足（OR关系）
-  return validConditions.some(condition => {
-    return slots.some(slot => {
-      return slot.attrId === condition.attrId && slot.attrNum >= condition.attrValue;
+  return validConditions.some((condition) => {
+    return slots.some((slot) => {
+      return (
+        slot.attrId === condition.attrId && slot.attrNum >= condition.attrValue
+      );
     });
   });
 };

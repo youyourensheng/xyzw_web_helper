@@ -1,5 +1,5 @@
 <template>
-  <MyCard class="star-upgrade" :statusClass="{ active: state.isRunning }">
+  <MyCard class="star-upgrade" :status-class="{ active: state.isRunning }">
     <template #icon>
       <img src="/icons/legionCup.png" alt="升级图标" />
     </template>
@@ -21,7 +21,7 @@
       </div>
     </template>
     <template #action>
-      <div class="action-row" v-if="HeroItem != null">
+      <div class="action-row" v-if="!isSameGameValue(HeroItem, null)">
         <div class="hero-item">
           <img :src="HeroItem.avatar" :alt="HeroItem.name" />
         </div>
@@ -50,7 +50,10 @@
             <a-button
               type="primary"
               :disabled="
-                judgeLevelupgrade(HeroItem.level, 1, HeroItem.order) == false
+                isSameGameValue(
+                  judgeLevelupgrade(HeroItem.level, 1, HeroItem.order),
+                  false,
+                )
               "
               size="small"
               @click="orderHeroUpgrade"
@@ -64,11 +67,13 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from "vue";
 import { useMessage } from "naive-ui";
+
+import { computed, ref, watch } from "vue";
 import { useTokenStore } from "@/stores/tokenStore";
-import MyCard from "../Common/MyCard.vue";
+import { isSameGameValue } from "@/utils/gameValue.js";
 import { HERO_DICT } from "@/utils/HeroList";
+import MyCard from "../Common/MyCard.vue";
 
 const tokenStore = useTokenStore();
 const message = useMessage();
@@ -76,9 +81,9 @@ const message = useMessage();
 const HeroOptions = computed(() => [
   ...Object.values(tokenStore.gameData.roleInfo.role.heroes).map((item) => {
     return {
-      label: HERO_DICT[item.heroId].name + "(" + item.level + "/6000)",
+      label: `${HERO_DICT[item.heroId].name}(${item.level}/6000)`,
       value: item.heroId,
-      disabled: item.level == 6000,
+      disabled: isSameGameValue(item.level, 6000),
     };
   }),
 ]);
@@ -127,7 +132,10 @@ watch(
   () => {
     if (HeroValue.value) {
       if (
-        tokenStore.gameData.roleInfo.role.heroes[HeroValue.value].level != 6000
+        !isSameGameValue(
+          tokenStore.gameData.roleInfo.role.heroes[HeroValue.value].level,
+          6000,
+        )
       ) {
         HeroItem.value = Object.assign(
           {},
@@ -160,12 +168,12 @@ const orderHeroUpgrade = async () => {
   state.value.isRunning = true;
 
   try {
-    let judgement = judgeLevelupgrade(
+    const judgement = judgeLevelupgrade(
       HeroItem.value.level,
       levelNum.value,
       HeroItem.value.order,
     );
-    if (judgement == HeroItem.value.level) {
+    if (isSameGameValue(judgement, HeroItem.value.level)) {
       const result = await tokenStore.sendMessageWithPromise(
         tokenId,
         "hero_heroupgradeorder",
@@ -207,12 +215,12 @@ const levelHeroUpgrade = async () => {
   state.value.isRunning = true;
 
   try {
-    let judgement = judgeLevelupgrade(
+    const judgement = judgeLevelupgrade(
       HeroItem.value.level,
       levelNum.value,
       HeroItem.value.order,
     );
-    if (judgement == false) {
+    if (isSameGameValue(judgement, false)) {
       const result = await tokenStore.sendMessageWithPromise(
         tokenId,
         "hero_heroupgradelevel",
@@ -226,7 +234,7 @@ const levelHeroUpgrade = async () => {
         tokenStore.sendGetRoleInfo(tokenId);
       }
     } else {
-      message.warning("请手动升级到" + judgement + "级,然后进行进阶");
+      message.warning(`请手动升级到${judgement}级,然后进行进阶`);
     }
   } catch (error) {
     message.error(`升级失败: ${error.message}`);
@@ -267,12 +275,12 @@ const judgeLevelupgrade = (level, levelNum, order) => {
       level,
       levelNum,
       order,
-      order != item.order,
+      !isSameGameValue(order, item.order),
       level <= item.level,
       item.level < level + levelNum,
     );
     if (
-      order != item.order &&
+      !isSameGameValue(order, item.order) &&
       level <= item.level &&
       item.level < level + levelNum
     ) {
@@ -283,8 +291,6 @@ const judgeLevelupgrade = (level, levelNum, order) => {
   }
   return false;
 };
-
-const formatTime = (ts) => new Date(ts).toLocaleTimeString("zh-CN");
 </script>
 
 <style scoped lang="scss">

@@ -1,13 +1,12 @@
+import naive from "naive-ui";
+import { createPinia } from "pinia";
+import { createApp } from "vue";
+
+import App from "./App.vue";
+import router from "./router";
 import "@arco-design/web-vue/dist/arco.css";
 import "virtual:uno.css";
 import "./assets/styles/global.scss";
-
-import { createApp } from "vue";
-import { createPinia } from "pinia";
-import naive from "naive-ui";
-import router from "./router";
-import App from "./App.vue";
-// import { i18n } from './locales';
 
 // 创建应用实例
 const app = createApp(App);
@@ -16,7 +15,6 @@ const app = createApp(App);
 app.use(createPinia());
 app.use(router);
 app.use(naive);
-// app.use(i18n)
 
 // 全局主题应用：从 localStorage 读取并设置 data-theme 属性
 const applyTheme = () => {

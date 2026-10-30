@@ -64,11 +64,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
-import { useRouter } from "vue-router";
-import { useMessage } from "naive-ui";
-import { useTokenStore } from "@/stores/tokenStore";
 import { CloudDone } from "@vicons/ionicons5";
+import { useMessage } from "naive-ui";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
+import { useTokenStore } from "@/stores/tokenStore";
 
 const router = useRouter();
 const message = useMessage();
@@ -101,106 +101,7 @@ const isConnected = computed(() => {
   return connectionStatus.value === "connected";
 });
 
-const pickArenaTargetId = (targets) => {
-  const candidate =
-    targets?.rankList?.[0] ||
-    targets?.roleList?.[0] ||
-    targets?.targets?.[0] ||
-    targets?.targetList?.[0] ||
-    targets?.list?.[0];
-
-  if (candidate?.roleId) return candidate.roleId;
-  if (candidate?.id) return candidate.id;
-  return targets?.roleId || targets?.id;
-};
-
 // 方法
-const handleFeatureAction = async (featureType) => {
-  if (!tokenStore.selectedToken) {
-    message.warning("请先选择Token");
-    router.push("/tokens");
-    return;
-  }
-
-  const status = tokenStore.getWebSocketStatus(tokenStore.selectedToken.id);
-  if (status !== "connected") {
-    message.warning("WebSocket未连接，请先建立连接");
-    return;
-  }
-
-  const tokenId = tokenStore.selectedToken.id;
-
-  const actions = {
-    "team-challenge": async () => {
-      message.info("开始执行队伍挑战...");
-      let targets;
-      try {
-        targets = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "arena_getareatarget",
-          {},
-          8000,
-        );
-      } catch (err) {
-        message.error(`获取竞技场目标失败：${err.message}`);
-        return;
-      }
-      const targetId = pickArenaTargetId(targets);
-      if (!targetId) {
-        message.warning("未找到可挑战的竞技场目标");
-        return;
-      }
-      try {
-        await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "fight_startareaarena",
-          { targetId },
-          15000,
-        );
-        message.success("竞技场战斗已发起");
-      } catch (err) {
-        message.error(`竞技场战斗失败：${err.message}`);
-      }
-    },
-    "daily-tasks": () => {
-      message.info("启动每日任务服务...");
-      tokenStore.sendMessage(tokenId, "task_claimdailyreward");
-    },
-    "salt-robot": () => {
-      message.info("领取盐罐机器人奖励...");
-      tokenStore.sendMessage(tokenId, "bottlehelper_claim");
-    },
-    "idle-time": () => {
-      message.info("领取挂机时间奖励...");
-      tokenStore.sendMessage(tokenId, "system_claimhangupreward");
-    },
-    "power-switch": () => {
-      message.info("执行威震大开关...");
-      tokenStore.sendMessage(tokenId, "role_getroleinfo");
-    },
-    "club-ranking": () => {
-      message.info("报名俱乐部排位...");
-      tokenStore.sendMessage(tokenId, "legionmatch_rolesignup");
-    },
-    "club-checkin": () => {
-      message.info("执行俱乐部签到...");
-      tokenStore.sendMessage(tokenId, "legion_signin");
-    },
-    "tower-challenge": () => {
-      message.info("开始爬塔挑战...");
-      // 关键业务：只提示 UI，不打印冗余日志
-      // 实际请求体: {"ack":0,"body":{},"cmd":"fight_starttower","seq":XX,"time":TIMESTAMP}
-      tokenStore.sendMessage(tokenId, "fight_starttower");
-    },
-  };
-
-  const action = actions[featureType];
-  if (action) {
-    await action();
-  } else {
-    message.warning("功能暂未实现");
-  }
-};
 
 // 已移除 sendWebSocketMessage，使用 tokenStore.sendMessage 代替
 
@@ -283,7 +184,9 @@ watch(
         if (
           importMethod === "url" ||
           importMethod === "bin" ||
-          importMethod === "wxQrcode"
+          importMethod === "wxQrcode" ||
+          importMethod === "mobile" ||
+          importMethod === "wxForceLogout"
         ) {
           message.warning("Token已过期，正在尝试自动刷新...");
           return;

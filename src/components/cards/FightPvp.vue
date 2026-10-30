@@ -51,7 +51,7 @@
               filterable
               tag
               allow-create
-              :placeholder="'请选择或输入切磋次数'"
+              placeholder="请选择或输入切磋次数"
               @update:value="handleFightNumChange"
             />
           </div>
@@ -291,12 +291,13 @@
 
           <div class="result-list">
             <div
-              v-for="(battle, index) in fightResult.resultCount"
-              :key="index"
-              :class="['battle-result-item', battle.isWin ? 'win' : 'loss']"
+              v-for="(battle, battleIndex) in fightResult.resultCount"
+              :key="battleIndex"
+              class="battle-result-item"
+              :class="[battle.isWin ? 'win' : 'loss']"
             >
               <div class="battle-header">
-                <span class="battle-index">第 {{ index + 1 }} 场</span>
+                <span class="battle-index">第 {{ battleIndex + 1 }} 场</span>
                 <n-tag :type="battle.isWin ? 'success' : 'error'" size="small">
                   {{ battle.isWin ? "胜利" : "失败" }}
                 </n-tag>
@@ -419,14 +420,20 @@
             </n-descriptions-item>
             <n-descriptions-item label="鱼灵">
               {{
-                heroModealTemp?.PearlInfo?.FishInfo?.name != undefined
+                !isSameGameValue(
+                  heroModealTemp?.PearlInfo?.FishInfo?.name,
+                  undefined,
+                )
                   ? heroModealTemp.PearlInfo?.FishInfo?.name
                   : "无"
               }}
             </n-descriptions-item>
             <n-descriptions-item label="鱼珠技能">
               {{
-                heroModealTemp?.PearlInfo?.PearlSkill?.name != undefined
+                !isSameGameValue(
+                  heroModealTemp?.PearlInfo?.PearlSkill?.name,
+                  undefined,
+                )
                   ? heroModealTemp.PearlInfo?.PearlSkill?.name
                   : "无"
               }}
@@ -437,7 +444,7 @@
                   v-for="item in heroModealTemp.PearlInfo.slotMap"
                   :key="item.id"
                   class="ModalEquipment"
-                  :style="'background-color:' + item.value"
+                  :style="`background-color:${item.value}`"
                 ></div>
               </div>
               <div v-else>无</div>
@@ -516,44 +523,24 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from "vue";
-import { useMessage, NDatePicker, NPagination } from "naive-ui";
+import { Copy, Refresh, Trophy } from "@vicons/ionicons5";
+
+import html2canvas from "html2canvas";
+import { useMessage } from "naive-ui";
+import { onMounted, ref, watch } from "vue";
 import { useTokenStore } from "@/stores/tokenStore";
+import { isSameGameValue } from "@/utils/gameValue.js";
+
+import { gettoday } from "@/utils/goldWarrankUtils";
 import {
-  Trophy,
-  Refresh,
-  Copy,
-  ChevronDown,
-  ChevronUp,
-  DocumentText,
-} from "@vicons/ionicons5";
-import {
-  getLastSaturday,
-  formatTimestamp,
-  formatTimestamp1,
-  parseBattleResult,
-  parseAttackType,
-  formatBattleRecordsForExport,
-  copyToClipboard,
-} from "@/utils/clubBattleUtils";
-import {
-  gettoday,
-  formatWarrankRecordsForExport,
-  allianceincludes,
-} from "@/utils/goldWarrankUtils";
-import {
+  formatWeapon,
   HERO_DICT,
   HeroFillInfo,
-  formatWeapon,
   legacycolor,
 } from "@/utils/HeroList";
-import html2canvas from "html2canvas";
 import { downloadCanvasAsImage } from "@/utils/imageExport";
 
-// 确保legacycolor在模板中可用
-const legacyColorMap = legacycolor;
-
-const props = defineProps({
+defineProps({
   visible: {
     type: Boolean,
     default: false,
@@ -564,25 +551,20 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["update:visible"]);
+// 确保legacycolor在模板中可用
+const legacyColorMap = legacycolor;
 
 const message = useMessage();
 const tokenStore = useTokenStore();
-
-const showModal = computed({
-  get: () => props.visible,
-  set: (val) => emit("update:visible", val),
-});
 
 const exportDom = ref(null);
 const loading1 = ref(false);
 const loadingText = ref("正在查询对手信息...");
 const topranklist = ref(null);
-const expandedMembers = ref(new Set());
-const roleIdinput = ref("");
+
 const queryDate = ref("");
 const targetId = ref("");
-const teamArray = ref(null);
+
 //切磋对手信息
 const memberData = ref(null);
 //批量数量
@@ -618,17 +600,12 @@ const options = [
     value: 50,
   },
 ];
-let player_date = { name: "", power: "" };
 
 // 分页状态
-const currentPage = ref(1);
-const pageSize = ref(20); // 每页20条，共5页
+
+// 每页20条，共5页
 
 // 计算总页数
-const totalPages = computed(() => {
-  if (!topranklist.value) return 0;
-  return Math.ceil(Object.keys(topranklist.value).length / pageSize.value);
-});
 
 const selectHeroInfo = (heroInfo) => {
   showHeroModal.value = true;
@@ -636,50 +613,22 @@ const selectHeroInfo = (heroInfo) => {
 };
 
 // 获取当前页的数据
-const currentPageData = computed(() => {
-  if (!topranklist.value) return {};
 
-  const startIndex = (currentPage.value - 1) * pageSize.value;
-  const endIndex = startIndex + pageSize.value;
-  const entries = Object.entries(topranklist.value);
-
-  return Object.fromEntries(entries.slice(startIndex, endIndex));
-});
 // 格式化战力
 const formatPower = (power) => {
   if (!power) return "0";
   if (power >= 100000000) {
-    return (power / 100000000).toFixed(2) + "亿";
+    return `${(power / 100000000).toFixed(2)}亿`;
   }
   if (power >= 10000) {
-    return (power / 10000).toFixed(2) + "万";
+    return `${(power / 10000).toFixed(2)}万`;
   }
   return power.toString();
 };
 
 // 获取战斗样式类
-const getBattleClass = (battle) => {
-  const classes = [];
-  if (battle.isWin) {
-    classes.push("battle-win");
-  } else {
-    classes.push("battle-loss");
-  }
-  return classes.join(" ");
-};
-
-const formatScore = (score) => {
-  return score.toFixed(0).toString();
-};
-
-const formatServerId = (ServerId) => {
-  return (ServerId - 27).toFixed(0).toString();
-};
 
 // 处理图片加载错误
-const handleImageError = (event) => {
-  event.target.style.display = "none";
-};
 
 // 切磋
 const fetchfightPVP = async () => {
@@ -705,8 +654,8 @@ const fetchfightPVP = async () => {
     let winCount = 0;
     let ourTotalDieHeroCount = 0; // 我方总掉落将领数
     let enemyTotalDieHeroCount = 0; // 敌方总掉落将领数
-    let resultCount = [];
-    for (var i = 0; i < fightNum.value; i++) {
+    const resultCount = [];
+    for (let i = 0; i < fightNum.value; i++) {
       const result = await tokenStore.sendMessageWithPromise(
         tokenId,
         "fight_startpvp",
@@ -723,7 +672,7 @@ const fetchfightPVP = async () => {
       //处理掉将情况
       let leftCount = 0;
       result.battleData.result.sponsor.teamInfo.forEach((item) => {
-        if (item.hp == 0) {
+        if (isSameGameValue(item.hp, 0)) {
           leftCount++;
         }
       });
@@ -731,13 +680,13 @@ const fetchfightPVP = async () => {
 
       let rightCount = 0;
       result.battleData.result.accept.teamInfo.forEach((item) => {
-        if (item.hp == 0) {
+        if (isSameGameValue(item.hp, 0)) {
           rightCount++;
         }
       });
       enemyTotalDieHeroCount += rightCount;
 
-      let tempObj = {
+      const tempObj = {
         leftName: result.battleData.leftTeam.name,
         leftheadImg: result.battleData.leftTeam.headImg,
         leftpower: formatPower(result.battleData.leftTeam.power),
@@ -747,7 +696,7 @@ const fetchfightPVP = async () => {
         //掉将情况
         leftDieHero: leftCount,
         rightDieHero: rightCount,
-        isWin: result.battleData.result.isWin ? true : false, //对战结果
+        isWin: !!result.battleData.result.isWin, //对战结果
       };
       if (result.battleData.result.isWin) {
         winCount++;
@@ -858,17 +807,17 @@ const fetchTargetInfo = async () => {
 
 /**
  * 提取数组中的英雄信息
- * @param {Object} heroObj
+ * @param {object} heroObj
  */
 const getHeroInfo = (heroObj) => {
   //统计总红数
   let redCount = 0;
   let holeCount = 0;
-  let heroList = [];
+  const heroList = [];
   Object.values(heroObj).forEach((hero) => {
-    let heroInfo = HERO_DICT[hero.heroId];
-    let equipmentInfo = getEquipment(hero.equipment);
-    let tempObj = {
+    const heroInfo = HERO_DICT[hero.heroId];
+    const equipmentInfo = getEquipment(hero.equipment);
+    const tempObj = {
       heroId: hero.heroId, //英雄ID
       heroSort: hero.battleTeamSlot, //阵容站位
       artifactId: hero.artifactId, //英雄装备ID，用于匹配鱼灵信息
@@ -900,13 +849,13 @@ const getHeroInfo = (heroObj) => {
 const getEquipment = (equipment) => {
   let redCount = 0;
   let holeCount = 0;
-  let equipArr = [];
+
   //此处遍历4件装备
   Object.values(equipment).forEach((equ) => {
     //遍历每件装备的属性
     Object.values(equ.quenches).forEach((item) => {
       holeCount++;
-      if (item.colorId == 6) {
+      if (isSameGameValue(item.colorId, 6)) {
         redCount++;
       }
     });
@@ -915,10 +864,7 @@ const getEquipment = (equipment) => {
 };
 
 // 处理分页大小改变
-const handlePageSizeChange = (size) => {
-  pageSize.value = size;
-  currentPage.value = 1; // 重置到第一页
-};
+
 // 刷新战绩
 const fightPVPRefresh = () => {
   fetchfightPVP();
@@ -929,9 +875,9 @@ const handleFightNumChange = (value) => {
   // 确保输入的是有效的数字
   if (typeof value === "string") {
     // 如果是字符串，转换为数字
-    const num = parseInt(value, 10);
+    const num = Number.parseInt(value, 10);
     // 确保数字有效且大于0,尽量限制最大次数,万一谁请求打多了,可不是什么好事情
-    if (!isNaN(num) && num > 0 && num <= 50) {
+    if (!Number.isNaN(+num) && num > 0 && num <= 50) {
       fightNum.value = num;
     } else {
       // 否则重置为默认值1
@@ -955,6 +901,7 @@ const getTargetInfo = () => {
 const handleExport1 = async () => {
   // 校验：确保DOM已正确绑定
   if (!exportDom.value) {
+    // eslint-disable-next-line no-alert -- Preserve the existing native notification or confirmation flow.
     alert("未找到要导出的DOM元素");
     return;
   }
@@ -1000,14 +947,12 @@ const handleExport1 = async () => {
     downloadCanvasAsImage(canvas, "切磋结果.png");
   } catch (err) {
     console.error("导出图片失败:", err);
+    // eslint-disable-next-line no-alert -- Preserve the existing native notification or confirmation flow.
     alert("导出图片失败，请重试");
   }
 };
 
 // 关闭弹窗
-const handleClose = () => {
-  expandedMembers.value.clear();
-};
 
 // 暴露方法给父组件
 defineExpose({

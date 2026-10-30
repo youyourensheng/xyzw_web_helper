@@ -38,7 +38,7 @@ class Logger {
     // 开发环境根据localStorage配置决定
     const saved = localStorage.getItem("ws_debug_level");
     if (saved) {
-      return parseInt(saved, 10);
+      return Number.parseInt(saved, 10);
     }
 
     return LOG_LEVELS.VERBOSE; // 开发环境默认显示详细级别
@@ -101,7 +101,7 @@ class Logger {
   }
 
   wsDisconnect(tokenId, reason = "") {
-    this.info(`🔌 WebSocket断开: ${tokenId}${reason ? " - " + reason : ""}`);
+    this.info(`🔌 WebSocket断开: ${tokenId}${reason ? ` - ${reason}` : ""}`);
   }
 
   wsError(tokenId, error) {
@@ -115,7 +115,7 @@ class Logger {
   }
 
   wsStatus(tokenId, status, details = "") {
-    this.info(`📊 [${tokenId}] ${status}${details ? " - " + details : ""}`);
+    this.info(`📊 [${tokenId}] ${status}${details ? ` - ${details}` : ""}`);
   }
 
   // 连接管理专用日志
